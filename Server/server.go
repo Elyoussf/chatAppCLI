@@ -1,103 +1,91 @@
-package main
+package server
 
 import (
-	"log"
+	"encoding/json"
+	"fmt"
 	"net/http"
-	"os"
-	"os/signal"
-	"sync"
-	"websocket/ui"
 
 	"github.com/gorilla/websocket"
 )
 
-type ChatServer struct {
-	messages []ui.Message
-	lock     sync.Mutex
-	id       int
+type message struct {
+	Author       string
+	Content      string
+	Timestamp    string
+	mood         bool
+	TargetedRoom string // name of the room
+	Kind         string // The message either for communication purpose (Plaint message) or a message to trigger something
 }
 
-func NewChatServer() *ChatServer {
-	return &ChatServer{
-		messages: make([]ui.Message, 0),
+type client struct {
+	NickName string
+	Online   bool
+}
+
+type room struct {
+	Name    string
+	Clients []*client
+}
+
+var upgrader = websocket.Upgrader{}
+
+var AllClients []*client
+
+func EstablishUpgradedConnection(w http.ResponseWriter, r *http.Request) error {
+	c, err := upgrader.Upgrade(w, r, nil)
+
+	if err != nil {
+		return fmt.Errorf("failed to upgrade the connection !! ; error : %s ", err)
 	}
-}
+	_, msg, err := c.ReadMessage()
+	if err != nil {
+		return fmt.Errorf("error occured while reading byte of received message")
+	}
+	var MSG message
+	err = json.Unmarshal(msg, &MSG)
+	if err != nil {
 
-func (cs *ChatServer) AddMessage(content, author string) {
-	cs.lock.Lock()
-	defer cs.lock.Unlock()
-	cs.id++
-	cs.messages = append(cs.messages, ui.Message{
-		Content: content,
-		Author:  author,
-		ID:      cs.id,
-	})
-}
+		return fmt.Errorf("failed to unmarshal the received data : %s", err)
 
-func (cs *ChatServer) GetMessages() []ui.Message {
-	cs.lock.Lock()
-	defer cs.lock.Unlock()
-	return append([]ui.Message(nil), cs.messages...)
-}
-
-func HandleServerConnection(conn *websocket.Conn, server *ChatServer) {
-	defer conn.Close()
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	// Goroutine for sending messages
-	go func() {
-		defer wg.Done()
-		for {
-			ui.DrawTerminal(server.GetMessages())
-			input := ui.GetUserInput()
-			server.AddMessage(input, "Server")
-			if err := conn.WriteMessage(websocket.TextMessage, []byte(input)); err != nil {
-				log.Printf("Error sending message: %v", err)
-				return
-			}
-			ui.DrawTerminal(server.GetMessages())
+	}
+	if MSG.Kind == "init" {
+		nickname := MSG.Author
+		Response := message{
+			Author:       "",
+			Content:      "",
+			Timestamp:    " ",
+			mood:         false,
+			TargetedRoom: "",
+			Kind:         "init",
 		}
-	}()
+		for _, name := range AllClients {
+			if nickname == name.NickName {
+				Response.Content = "Duplicated Nickname , Nickname provoided already existed in our database"
+				ActualMSG, err := json.Marshal(Response)
+				if err != nil {
 
-	// Goroutine for receiving messages
-	go func() {
-		defer wg.Done()
-		for {
-			_, msg, err := conn.ReadMessage()
-			if err != nil {
-				log.Printf("Error receiving message: %v", err)
-				return
+					return fmt.Errorf("error while marshalling response to the client :%s ", err)
+
+				}
+
+				err = c.WriteMessage(websocket.TextMessage, ActualMSG)
+				if err != nil {
+					return fmt.Errorf("error occured while trying to send back the message of SIgnedUp to the client")
+				}
 			}
-			server.AddMessage(string(msg), "Client")
-			ui.DrawTerminal(server.GetMessages())
 		}
-	}()
-
-	wg.Wait()
-}
-
-func main() {
-	server := NewChatServer()
-
-	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := websocket.Upgrade(w, r, http.Header{}, 0, 0)
+		Response.mood = true
+		ActualMSG, err := json.Marshal(Response)
 		if err != nil {
-			log.Printf("Failed to upgrade: %v", err)
-			return
+			return fmt.Errorf("error while marshalling response to the client : %s ", err)
 		}
-		HandleServerConnection(conn, server)
-	})
+		err = c.WriteMessage(websocket.TextMessage, ActualMSG)
+		if err != nil {
+			return fmt.Errorf("error occured while trying to send back the message of signUp to the client")
+		}
 
-	interrupt := make(chan os.Signal, 1)
-	signal.Notify(interrupt, os.Interrupt)
-
-	go func() {
-		log.Fatal(http.ListenAndServe(":8080", nil))
-	}()
-
-	log.Println("Server is running on ws://localhost:8080/ws")
-	<-interrupt
-	log.Println("Server shutting down...")
+	} else {
+		return fmt.Errorf("the server expcted a message of type init but kind %s is provided", MSG.Kind)
+	}
+	return nil
 }
