@@ -27,25 +27,27 @@ type room struct {
 	Clients []*client
 }
 
+var AvailableRooms []*room
+
 var upgrader = websocket.Upgrader{}
 
 var AllClients []*client
 
-func EstablishUpgradedConnection(w http.ResponseWriter, r *http.Request) error {
+func EstablishUpgradedConnection(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error) {
 	c, err := upgrader.Upgrade(w, r, nil)
 
 	if err != nil {
-		return fmt.Errorf("failed to upgrade the connection !! ; error : %s ", err)
+		return c, fmt.Errorf("failed to upgrade the connection !! ; error : %s ", err)
 	}
 	_, msg, err := c.ReadMessage()
 	if err != nil {
-		return fmt.Errorf("error occured while reading byte of received message")
+		return c, fmt.Errorf("error occured while reading byte of received message")
 	}
 	var MSG message
 	err = json.Unmarshal(msg, &MSG)
 	if err != nil {
 
-		return fmt.Errorf("failed to unmarshal the received data : %s", err)
+		return c, fmt.Errorf("failed to unmarshal the received data : %s", err)
 
 	}
 	if MSG.Kind == "init" {
@@ -64,28 +66,60 @@ func EstablishUpgradedConnection(w http.ResponseWriter, r *http.Request) error {
 				ActualMSG, err := json.Marshal(Response)
 				if err != nil {
 
-					return fmt.Errorf("error while marshalling response to the client :%s ", err)
+					return c, fmt.Errorf("error while marshalling response to the client :%s ", err)
 
 				}
 
 				err = c.WriteMessage(websocket.TextMessage, ActualMSG)
 				if err != nil {
-					return fmt.Errorf("error occured while trying to send back the message of SIgnedUp to the client")
+					return c, fmt.Errorf("error occured while trying to send back the message of SIgnedUp to the client")
 				}
 			}
 		}
 		Response.mood = true
 		ActualMSG, err := json.Marshal(Response)
 		if err != nil {
-			return fmt.Errorf("error while marshalling response to the client : %s ", err)
+			return c, fmt.Errorf("error while marshalling response to the client : %s ", err)
 		}
 		err = c.WriteMessage(websocket.TextMessage, ActualMSG)
 		if err != nil {
-			return fmt.Errorf("error occured while trying to send back the message of signUp to the client")
+			return c, fmt.Errorf("error occured while trying to send back the message of signUp to the client")
 		}
 
 	} else {
-		return fmt.Errorf("the server expcted a message of type init but kind %s is provided", MSG.Kind)
+		return c, fmt.Errorf("the server expcted a message of type init but kind %s is provided", MSG.Kind)
 	}
-	return nil
+	return c, nil
+}
+
+func JoinClientRoom(c *websocket.Conn) {
+	_, msg, err := c.ReadMessage()
+	if err != nil {
+		fmt.Println("Error occured while reading the message , error : ", err)
+		return
+	}
+	var Response message
+	err = json.Unmarshal(msg, &Response)
+	if err != nil {
+		fmt.Println("Error while unmarshalling the message !!") // In this case the client will wait for the response indefintely , we assume that won't happen in beta version
+		return
+	}
+	if Response.Kind == "negotiate_name" { // means it's a new room
+		response_msg := message{
+			Author:       "",
+			Content:      "",
+			Timestamp:    "",
+			mood:         true,
+			TargetedRoom: "", // name of the room
+			Kind:         "negotiate_name",
+		}
+		for _, room := range AvailableRooms {
+			if Response.Content == room.Name {
+				response_msg.mood = false // Server not ok
+				c.WriteMessage()
+				return
+			}
+		}
+	}
+
 }
