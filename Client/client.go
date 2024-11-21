@@ -3,7 +3,8 @@ package client
 import (
 	"encoding/json"
 	"fmt"
-
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -85,6 +86,12 @@ func DetermineMyRoom(Author string, Conn *websocket.Conn) string { // returns th
 	// we gonna rely on a ui that will interact with the user in this case
 	// At this point we suppose there is a procedure that does that and returns the user choice
 	var ExistingRoom bool // This is true if he has choosen an existing one Otherwise false
+	ClientName, ExistingRoom = askForUserChoice(Conn)
+	if len(ClientName) == 0 {
+		fmt.Println("The error above occured while Asking for the user choice ;  The connection is broken ")
+		return ""
+	}
+
 	if !ExistingRoom {
 		// we gotta create a new room with the given name "ClientName"
 		NewRoom, err := json.Marshal(message{
@@ -150,6 +157,7 @@ func DetermineMyRoom(Author string, Conn *websocket.Conn) string { // returns th
 			return ""
 		}
 		_, msg, err := Conn.ReadMessage()
+
 		var Response message
 		err = json.Unmarshal(msg, &Response)
 		if err != nil {
@@ -232,10 +240,148 @@ func askForUserChoice(Conn *websocket.Conn) (string, bool) { // string is for th
 				}
 			} else {
 				fmt.Println("The server was not expected to answer in this way , contact hamza")
+				break
 			}
 		}
 
 	} else {
 		// Send to the server to give you the list of the available room to choose from!! ()
+		for {
+			var name string
+			fmt.Println("Getting the available rooms from the server ")
+			fmt.Scan(name)
+			AvailableRooms, err := json.Marshal(message{
+				Author:       "",
+				Content:      "",
+				Timestamp:    "",
+				mood:         true,
+				TargetedRoom: "",
+				Kind:         "get_available_rooms",
+			})
+
+			if err != nil {
+
+				fmt.Println("Error occured while marshalling the request for The available rooms, Contact the developper")
+				break
+			}
+
+			err = Conn.WriteMessage(websocket.TextMessage, AvailableRooms)
+			if err != nil {
+				fmt.Println("Error occured while Requesting for the available rooms, plz contact the developper hamza ")
+				return "", false
+			}
+			_, msg, err := Conn.ReadMessage()
+			if err != nil {
+				fmt.Println("an error occured while decoding the received message Contact the dev")
+				return "", false
+
+			}
+			var Response message
+			err = json.Unmarshal(msg, &Response)
+			if err != nil {
+				fmt.Println("error while unmarshalling the message")
+				return "", false
+
+			}
+			if Response.Kind == "get_available_rooms" {
+				if Response.mood {
+					fmt.Println("The available rooms are : ")
+
+					time.Sleep(50 * time.Millisecond)
+					rooms := strings.Split(Response.Content, " ")
+					enumerate := make(map[int]string)
+					for i, room := range rooms {
+						enumerate[i] = room
+						fmt.Println(i, " ", room)
+					}
+
+					var id int
+					var choice string
+					for {
+						fmt.Println("Please choose a corresponding number")
+						id, err = strconv.Atoi(choice)
+						if err != nil {
+							fmt.Println("Not a valid input , please enter a valid integer among the ones listed!")
+							continue
+						}
+						val, exist := enumerate[id] // The annotation comma-ok
+						if exist {
+							return val, true
+						} else {
+							fmt.Println("You have entered a room id that does not exist in the list")
+							continue
+						}
+
+					}
+
+				} else {
+					fmt.Println("The server was not Okay and justified with : ", Response.Content)
+					fmt.Println("We will start over")
+					continue
+				}
+			} else {
+				fmt.Println("The server was not expected to answer in this way , contact hamza")
+				return "", false
+			}
+		}
+	}
+	return "", false
+}
+
+func SendMessage(Conn *websocket.Conn, Author string, room string) error {
+	fmt.Println("This message will be sent to the room ", room, "Write it below")
+	var MessageContent string
+	fmt.Scan(MessageContent)
+	msg := message{
+		Author:       Author,
+		Content:      MessageContent,
+		Timestamp:    time.Now().String(),
+		mood:         true,
+		TargetedRoom: room,
+		Kind:         "normal",
+	}
+	MarshalledMessage, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("a fatal error occured while marshalling the message to json , the error : %s ", err)
+
+	}
+
+	err = Conn.WriteMessage(websocket.TextMessage, MarshalledMessage)
+	if err != nil {
+		return fmt.Errorf("error occured while sending the message : %s ", err)
+	}
+	return nil
+}
+
+func ReceiveMessage(Conn *websocket.Conn) {
+	_, msg, err := Conn.ReadMessage()
+	if err != nil {
+		fmt.Println("An error occured while Redaing the message")
+	}
+	var Response message
+	err = json.Unmarshal(msg, &Response)
+	if err != nil {
+		fmt.Println("Failed to unmarshall the received message !")
+	}
+
+	if Response.Kind == "normal" {
+		fmt.Println("From : ", Response.Author, "in the room : ", Response.TargetedRoom)
+		fmt.Println(Response.Content)
+	}
+}
+
+func main() {
+	fmt.Println("Note : Some non valid input could break connection and you need to start over ")
+	Author, err, Conn := ConnecToTheServer()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	if len(Author) != 0 && Conn != nil {
+		RoomName := DetermineMyRoom(Author, Conn)
+		for {
+			go SendMessage(Conn, Author, RoomName)
+			go ReceiveMessage(Conn)
+		}
 	}
 }
