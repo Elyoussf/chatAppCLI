@@ -62,7 +62,4 @@ Feel free to fork this repository and submit pull requests. For major changes, p
 
 ## License 📄
 
-[MIT License](LICENSE)
-
----
-Made with ❤️ using Go and WebSocket
+Ait Elghawi licence
