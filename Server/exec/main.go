@@ -146,7 +146,7 @@ func (s *Server) handleClient(client *Client) {
 		case "add_to_room":
 			s.handleJoinRoom(client, msg)
 		case "normal":
-			s.handleChatMessage(client, msg)
+			s.handleChatMessage(msg)
 		}
 	}
 }
@@ -244,7 +244,7 @@ func (s *Server) handleJoinRoom(client *Client, msg Message) {
 }
 
 // handleChatMessage handles normal chat messages
-func (s *Server) handleChatMessage(client *Client, msg Message) {
+func (s *Server) handleChatMessage(msg Message) {
 	msg.Timestamp = time.Now().Format(time.RFC3339)
 
 	s.mu.RLock()
@@ -256,11 +256,16 @@ func (s *Server) handleChatMessage(client *Client, msg Message) {
 	}
 
 	room.mu.RLock()
+
 	for _, targetClient := range room.clients {
+
 		targetClient.mu.Lock()
+
 		targetClient.conn.WriteJSON(msg)
+
 		targetClient.mu.Unlock()
 	}
+
 	room.mu.RUnlock()
 }
 
